@@ -48,7 +48,7 @@ Jisheng is a poker session tracker for live cash-game players, built around Maca
 
 ### 技术栈
 
-- Flutter（CI 使用 3.19.0 stable，SDK 要求 Dart >=3.0）
+- Flutter（CI 使用 3.47.2 stable，SDK 要求 Dart >=3.0）
 - sqflite（SQLite）· Provider（状态管理）· excel（导入导出）· share_plus / file_picker
 - 无后端、无账号体系；图表自绘 CustomPainter，无第三方图表依赖
 
@@ -111,7 +111,7 @@ flutter build apk --release   # 出包
 
 ### Tech
 
-- Flutter (CI: 3.19.0 stable; Dart >=3.0)
+- Flutter (CI: 3.47.2 stable; Dart >=3.0)
 - sqflite · Provider · excel · share_plus / file_picker
 - No backend, no accounts; charts hand-drawn with CustomPainter (no chart library)
 
