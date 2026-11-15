@@ -15,6 +15,9 @@ class ImportResult {
   final int exchangeDuplicateCount;
   final String? errorMessage;
 
+  /// 兑换表处理情况（诊断用：找到哪张表/解析成功几条），弹窗里直接展示
+  final String? exchangeInfo;
+
   ImportResult({
     required this.newRecords,
     required this.duplicateCount,
@@ -23,6 +26,7 @@ class ImportResult {
     this.newExchangeRecords = const [],
     this.exchangeDuplicateCount = 0,
     this.errorMessage,
+    this.exchangeInfo,
   });
 }
 
@@ -120,14 +124,22 @@ class ExcelImporter {
       // ===== 兑换记录 sheet 解析（换机备份还原）=====
       final exchangeRecords = <ExchangeRecord>[];
       int exchangeDupCount = 0;
-      final exSheet = _findExchangeSheet(excel);
-      if (exSheet != null) {
-        final existingExKeys =
-            existingExchangeRecords.map((r) => _exDedupKey(r)).toSet();
-        final exHeader = _findHeaderRow(exSheet);
-        if (exHeader != null) {
+      String? exchangeInfo;
+      final exEntry = _findExchangeSheet(excel);
+      if (exEntry == null) {
+        exchangeInfo = '兑换表：文件里没找到\n现有工作表：${_describeSheets(excel)}';
+      } else {
+        final exSheet = exEntry.value;
+        final exHeader = _findExHeaderRow(exSheet);
+        if (exHeader == null) {
+          exchangeInfo =
+              '兑换表「${exEntry.key}」：未识别到表头\n首行内容：${_firstRowText(exSheet)}';
+        } else {
+          final existingExKeys =
+              existingExchangeRecords.map((r) => _exDedupKey(r)).toSet();
           final exColMap = _matchExchangeColumns(exHeader);
           final exHeaderIndex = exSheet.rows.indexOf(exHeader);
+          var parsed = 0;
           for (int i = exHeaderIndex + 1; i < exSheet.rows.length; i++) {
             final row = exSheet.rows[i];
             if (row.every((c) =>
@@ -144,10 +156,14 @@ class ExcelImporter {
               }
               exchangeRecords.add(er);
               existingExKeys.add(key);
+              parsed++;
             } catch (_) {
               // 单行解析失败跳过，不阻塞整体导入
             }
           }
+          exchangeInfo = '兑换表「${exEntry.key}」：识别列 '
+              '${exColMap.keys.join('/')}，成功 $parsed 条'
+              '${exchangeDupCount > 0 ? '，重复跳过 $exchangeDupCount 条' : ''}';
         }
       }
 
@@ -199,6 +215,7 @@ class ExcelImporter {
         failedDetails: failedDetails,
         newExchangeRecords: exchangeRecords,
         exchangeDuplicateCount: exchangeDupCount,
+        exchangeInfo: exchangeInfo,
       );
     } catch (e) {
       return _error('文件解析失败：$e\n请确认文件是有效的 Excel 表格 (.xlsx) 格式');
@@ -493,15 +510,61 @@ class ExcelImporter {
     return entries;
   }
 
-  /// 查找兑换记录 sheet（按 sheet 名包含「兑换」或 exchange 识别）
-  static Sheet? _findExchangeSheet(Excel excel) {
+  /// 查找兑换记录 sheet：先按名字（含「兑换」/exchange），
+  /// 再按表头内容兜底（同时出现「港币」和「人民币/汇率」的表）
+  static MapEntry<String, Sheet>? _findExchangeSheet(Excel excel) {
     for (final entry in excel.sheets.entries) {
       final name = entry.key.toLowerCase();
       if (name.contains('兑换') || name.contains('exchange')) {
-        return entry.value;
+        return entry;
+      }
+    }
+    for (final entry in excel.sheets.entries) {
+      final rows = entry.value.rows;
+      final limit = rows.length > 5 ? 5 : rows.length;
+      for (int i = 0; i < limit; i++) {
+        final text = rows[i]
+            .map((c) => c?.value?.toString().toLowerCase() ?? '')
+            .join('|');
+        if (text.contains('港币') &&
+            (text.contains('人民币') || text.contains('汇率'))) {
+          return entry;
+        }
       }
     }
     return null;
+  }
+
+  /// 找兑换表表头行（用兑换专用关键词打分，至少命中 2 个）
+  static List<Data?>? _findExHeaderRow(Sheet sheet) {
+    final limit = sheet.rows.length > 5 ? 5 : sheet.rows.length;
+    int bestScore = 0;
+    List<Data?>? bestRow;
+    for (int i = 0; i < limit; i++) {
+      final row = sheet.rows[i];
+      int score = 0;
+      for (final cell in row) {
+        if (cell == null) continue;
+        final text = cell.value?.toString().toLowerCase() ?? '';
+        for (final keywords in _exColumnKeywords.values) {
+          if (keywords.any((kw) => text.contains(kw.toLowerCase()))) score++;
+        }
+      }
+      if (score > bestScore && score >= 2) {
+        bestScore = score;
+        bestRow = row;
+      }
+    }
+    return bestRow;
+  }
+
+  /// 工作表首行内容（诊断用）
+  static String _firstRowText(Sheet sheet) {
+    if (sheet.rows.isEmpty) return '（空表）';
+    return sheet.rows.first
+        .map((c) => c?.value?.toString().trim() ?? '')
+        .where((s) => s.isNotEmpty)
+        .join(' | ');
   }
 
   /// 兑换表头列匹配（与账目表头逻辑一致）

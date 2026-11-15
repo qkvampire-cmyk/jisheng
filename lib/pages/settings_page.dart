@@ -228,6 +228,15 @@ class _SettingsPageState extends State<SettingsPage> {
             if (result.failedCount > 0)
               _resultLine(Icons.error_outline, Colors.red, '解析失败',
                   '${result.failedCount} 条'),
+            // 兑换表处理情况（诊断依据：找不到表 / 未识别表头 / 识别列 / 成功条数）
+            if (result.exchangeInfo != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                result.exchangeInfo!,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textMuted, height: 1.4),
+              ),
+            ],
             if (result.failedCount > 0) ...[
               const SizedBox(height: 12),
               const Text('失败详情：',
