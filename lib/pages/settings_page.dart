@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -145,6 +146,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
+      // 安卓（SAF）默认只给 path 不给 bytes，必须显式要求把内容读进内存，
+      // 否则 file.bytes 恒为 null → 一直提示「无法读取文件」
+      withData: true,
     );
     if (result == null || result.files.isEmpty) return;
 
@@ -155,9 +159,15 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    final bytes = file.bytes;
-    if (bytes == null) {
-      _showSnackBar('无法读取文件');
+    var bytes = file.bytes;
+    // 兜底：某些机型/来源（微信、网盘）withData 也可能拿不到，退回读 path
+    if (bytes == null && file.path != null) {
+      try {
+        bytes = await File(file.path!).readAsBytes();
+      } catch (_) {}
+    }
+    if (bytes == null || bytes.isEmpty) {
+      _showSnackBar('无法读取文件：没拿到文件内容\n请把文件先保存到手机「下载」目录再选它');
       return;
     }
 
