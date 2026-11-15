@@ -94,6 +94,11 @@ class ExcelExporter {
       ]);
     }
 
+    // 删掉 createExcel() 自带的空默认表（Sheet1），否则导入时可能读到空表
+    if (excel.sheets.containsKey('Sheet1')) {
+      excel.delete('Sheet1');
+    }
+
     // 保存到临时目录后调用系统分享
     final directory = await getTemporaryDirectory();
     final fileName =

@@ -54,18 +54,43 @@ class ExcelImporter {
         return _error('文件为空或无法读取');
       }
 
-      final sheet = excel.sheets.values.first;
-      if (sheet.rows.isEmpty) {
-        return _error('工作表为空');
+      // 选工作表：导出文件里除账单表外还有「兑换记录」表，且工作簿常带一张空的
+      // 默认表（Excel.createExcel() 的 Sheet1）——若直接取第一张会读到空表，
+      // 报「工作表为空」（2026-11 实测）。改为：按名字优先级 + 能识别表头 + 非空 来挑。
+      Sheet? sheet;
+      List<Data?>? headerRow;
+      // 第一优先：能同时认出「时间/金额/盲注」三列的表（账单表）
+      for (final entry in _orderedSheets(excel)) {
+        final s = entry.value;
+        if (s.rows.isEmpty) continue;
+        final h = _findHeaderRow(s);
+        if (h == null) continue;
+        final cm = _matchColumns(h);
+        if (!_requiredColumns.every(cm.containsKey)) continue;
+        sheet = s;
+        headerRow = h;
+        break;
+      }
+      // 第二优先：任何能认出表头的非空表（让后面的「缺少必填列」提示更准确）
+      if (sheet == null) {
+        for (final entry in _orderedSheets(excel)) {
+          final s = entry.value;
+          if (s.rows.isEmpty) continue;
+          final h = _findHeaderRow(s);
+          if (h == null) continue;
+          sheet = s;
+          headerRow = h;
+          break;
+        }
+      }
+      if (sheet == null) {
+        final anyNonEmpty = excel.sheets.values.any((s) => s.rows.isNotEmpty);
+        return _error(anyNonEmpty
+            ? '无法识别表头行。\n请确保表格第一行包含「时间」「金额」「盲注」等列名'
+            : '工作表为空：这个文件里没有可读取的数据');
       }
 
-      // 找表头行（扫描前 N 行）
-      final headerRow = _findHeaderRow(sheet);
-      if (headerRow == null) {
-        return _error('无法识别表头行。\n请确保表格第一行包含「时间」「金额」「盲注」等列名');
-      }
-
-      final columnMap = _matchColumns(headerRow);
+      final columnMap = _matchColumns(headerRow!);
 
       // 检查必填列
       final missingRequired =
@@ -438,6 +463,27 @@ class ExcelImporter {
     'ex_fee': ['手续费', 'fee'],
     'ex_remark': ['备注', 'remark', 'note', 'comment', 'memo'],
   };
+
+  /// sheet 排序：账单类表优先，兑换表最后（导出文件里兑换表也含「时间」等列，
+  /// 若排在前面会被误当成账单表）
+  static List<MapEntry<String, Sheet>> _orderedSheets(Excel excel) {
+    final entries = excel.sheets.entries.toList();
+    int rank(String name) {
+      final n = name.toLowerCase();
+      if (n.contains('兑换') || n.contains('exchange')) return 2;
+      if (n.contains('poker') ||
+          n.contains('record') ||
+          n.contains('bill') ||
+          name.contains('账单') ||
+          name.contains('明细')) {
+        return 0;
+      }
+      return 1;
+    }
+
+    entries.sort((a, b) => rank(a.key).compareTo(rank(b.key)));
+    return entries;
+  }
 
   /// 查找兑换记录 sheet（按 sheet 名包含「兑换」或 exchange 识别）
   static Sheet? _findExchangeSheet(Excel excel) {
