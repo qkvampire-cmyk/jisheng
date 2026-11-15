@@ -28,6 +28,9 @@ jobs:
       - name: Flutter Pub Get
         run: flutter pub get
 
+      - name: Flutter Analyze (self-check)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
       - name: Generate debug keystore
         run: |
           keytool -genkey -v -keystore android/app/debug.keystore \
