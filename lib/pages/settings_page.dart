@@ -121,14 +121,28 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final provider = context.read<PokerProvider>();
       final exProvider = context.read<ExchangeProvider>();
+      // 兜底：兑换流水若还没读出来（异步竞态/旧库读取失败），先强制重读一次，
+      // 否则会静默导出一张空兑换表（2026-11 用户真实数据因此丢失过一次）
+      if (exProvider.records.isEmpty) {
+        await exProvider.loadRecords();
+      }
+      final recordCount = provider.records.length;
+      final exchangeCount = exProvider.records.length;
       await ExcelExporter.exportRecords(
         provider.records,
         provider.exchangeRate,
         exchangeRecords: exProvider.records,
       );
       if (mounted) {
+        final warn = exchangeCount == 0
+            ? '\n⚠ 兑换记录 0 条，导出表里是空的'
+                '${exProvider.loadError != null ? '（读取失败：${exProvider.loadError}）' : ''}'
+            : '';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已调起分享面板')),
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text('已导出：账单 $recordCount 条、兑换 $exchangeCount 条$warn'),
+          ),
         );
       }
     } catch (e) {

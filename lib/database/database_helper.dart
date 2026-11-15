@@ -32,20 +32,36 @@ class DatabaseHelper {
   /// 旧库靠 onUpgrade 逐版升级，而全新安装只走 onCreate——曾因 onCreate 少了
   /// cny_amount 导致新机（朋友的安卓机）一保存就报 no column named cny_amount。
   Future<void> _onOpen(Database db) async {
-    final columns = <String>{};
-    for (final row in await db.rawQuery('PRAGMA table_info(poker_records)')) {
-      columns.add(row['name'] as String);
-    }
-    const required = <String, String>{
+    await _ensureColumns(db, 'poker_records', const <String, String>{
       'cny_amount': 'REAL',
       'table_type': 'TEXT',
       'hand_notes': 'TEXT',
       'trip_id': 'INTEGER',
-    };
+    });
+    // 兑换流水表同理：旧库若缺 fee_hkd/remark 等列，fromMap 会抛异常
+    // → 整张表静默读成空、导出也是空表（2026-11 数据丢失事故）
+    await _ensureColumns(db, 'exchange_records', const <String, String>{
+      'create_time': 'INTEGER',
+      'hkd_cash': 'REAL',
+      'bank_cny': 'REAL',
+      'actual_rate': 'REAL',
+      'fee_hkd': 'REAL DEFAULT 0',
+      'remark': 'TEXT',
+    });
+  }
+
+  /// 按 PRAGMA 结果补齐缺失列（表不存在时直接跳过，由 onCreate/onUpgrade 负责）
+  Future<void> _ensureColumns(
+      Database db, String table, Map<String, String> required) async {
+    final columns = <String>{};
+    for (final row in await db.rawQuery('PRAGMA table_info($table)')) {
+      columns.add(row['name'] as String);
+    }
+    if (columns.isEmpty) return;
     for (final entry in required.entries) {
       if (!columns.contains(entry.key)) {
         await db.execute(
-            'ALTER TABLE poker_records ADD COLUMN ${entry.key} ${entry.value}');
+            'ALTER TABLE $table ADD COLUMN ${entry.key} ${entry.value}');
       }
     }
   }

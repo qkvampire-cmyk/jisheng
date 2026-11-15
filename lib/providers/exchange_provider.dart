@@ -7,15 +7,25 @@ class ExchangeProvider extends ChangeNotifier {
 
   List<ExchangeRecord> _records = [];
   bool _isLoading = false;
+  String? _loadError;
 
   List<ExchangeRecord> get records => _records;
   bool get isLoading => _isLoading;
+
+  /// 最近一次读取失败的原因（null = 正常）。
+  /// 旧库列缺失时 fromMap 会抛异常 → 以前整张表静默变空、导出也是空表。
+  String? get loadError => _loadError;
 
   Future<void> loadRecords() async {
     _isLoading = true;
     notifyListeners();
 
-    _records = await _db.getAllExchangeRecords();
+    try {
+      _records = await _db.getAllExchangeRecords();
+      _loadError = null;
+    } catch (e) {
+      _loadError = '$e';
+    }
 
     _isLoading = false;
     notifyListeners();

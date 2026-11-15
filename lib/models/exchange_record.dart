@@ -52,14 +52,31 @@ class ExchangeRecord {
   }
 
   factory ExchangeRecord.fromMap(Map<String, dynamic> map) {
+    // 容错解析：旧库可能缺列/null（曾导致整张兑换表读成空表、导出空表）
+    double numOf(Object? v, [double fallback = 0]) {
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
+    final timeRaw = map['create_time'];
+    final createTime = timeRaw is int
+        ? DateTime.fromMillisecondsSinceEpoch(timeRaw)
+        : DateTime.now();
+    final hkd = numOf(map['hkd_cash']);
+    final cny = numOf(map['bank_cny']);
+    final rateRaw = map['actual_rate'];
+    final rate = rateRaw == null
+        ? (hkd > 0 ? cny / hkd : 0.0)
+        : numOf(rateRaw);
+
     return ExchangeRecord(
       id: map['id'] as int?,
-      createTime:
-          DateTime.fromMillisecondsSinceEpoch(map['create_time'] as int),
-      hkdCash: (map['hkd_cash'] as num).toDouble(),
-      bankCny: (map['bank_cny'] as num).toDouble(),
-      actualRate: (map['actual_rate'] as num).toDouble(),
-      feeHkd: (map['fee_hkd'] as num).toDouble(),
+      createTime: createTime,
+      hkdCash: hkd,
+      bankCny: cny,
+      actualRate: rate,
+      feeHkd: numOf(map['fee_hkd']),
       remark: map['remark'] as String?,
     );
   }
