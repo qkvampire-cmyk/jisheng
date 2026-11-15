@@ -85,9 +85,10 @@ class ExcelImporter {
       }
       if (sheet == null) {
         final anyNonEmpty = excel.sheets.values.any((s) => s.rows.isNotEmpty);
-        return _error(anyNonEmpty
-            ? '无法识别表头行。\n请确保表格第一行包含「时间」「金额」「盲注」等列名'
-            : '工作表为空：这个文件里没有可读取的数据');
+        return _error((anyNonEmpty
+                ? '无法识别表头行。\n请确保表格第一行包含「时间」「金额」「盲注」等列名'
+                : '工作表为空：这个文件里没有可读取的数据') +
+            '\n\n文件里的工作表：${_describeSheets(excel)}');
       }
 
       final columnMap = _matchColumns(headerRow!);
@@ -463,6 +464,13 @@ class ExcelImporter {
     'ex_fee': ['手续费', 'fee'],
     'ex_remark': ['备注', 'remark', 'note', 'comment', 'memo'],
   };
+
+  /// 出错时把文件里的 sheet 名 + 行数带到提示里，方便用户截图定位
+  static String _describeSheets(Excel excel) {
+    return excel.sheets.entries
+        .map((e) => '「${e.key}」${e.value.rows.length}行')
+        .join('、');
+  }
 
   /// sheet 排序：账单类表优先，兑换表最后（导出文件里兑换表也含「时间」等列，
   /// 若排在前面会被误当成账单表）
