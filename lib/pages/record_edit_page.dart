@@ -215,16 +215,26 @@ class _RecordEditPageState extends State<RecordEditPage> {
           : _handNotesController.text.trim(),
     );
 
-    if (widget.existingRecord == null) {
-      await provider.addRecord(record);
-      // 记住本次选的地点，下次新增默认用这个
-      await provider.setLastLocation(record.location);
-      // 记住本次选的桌型
-      if (_selectedTableType.isNotEmpty) {
-        await provider.setLastTableType(_selectedTableType);
+    try {
+      if (widget.existingRecord == null) {
+        await provider.addRecord(record);
+        // 记住本次选的地点，下次新增默认用这个
+        await provider.setLastLocation(record.location);
+        // 记住本次选的桌型
+        if (_selectedTableType.isNotEmpty) {
+          await provider.setLastTableType(_selectedTableType);
+        }
+      } else {
+        await provider.updateRecord(record);
       }
-    } else {
-      await provider.updateRecord(record);
+    } catch (e) {
+      // 保存失败必须让用户看到，不能静默失败
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存失败：$e')),
+        );
+      }
+      return;
     }
 
     if (mounted) Navigator.pop(context);

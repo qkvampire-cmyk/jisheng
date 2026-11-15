@@ -20,8 +20,12 @@ class RecordSegment {
   /// 行程编号（按时间升序自动编号，1 起；0 = 未分组）
   int tripNo;
 
-  /// 行程持续天数（首尾跨度 +1）
-  int get days => end.difference(start).inDays + 1;
+  /// 打牌天数：段内有记录的不同日历天数（中间休息的日子不计入）
+  int get days => records
+      .map((r) => DateTime(
+          r.recordTime.year, r.recordTime.month, r.recordTime.day))
+      .toSet()
+      .length;
 
   RecordSegment({
     required this.tripId,

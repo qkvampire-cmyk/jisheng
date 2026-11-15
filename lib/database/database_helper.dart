@@ -24,7 +24,30 @@ class DatabaseHelper {
       version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
+  }
+
+  /// 打开后自检表结构：把历史上漏建的列补齐。
+  /// 旧库靠 onUpgrade 逐版升级，而全新安装只走 onCreate——曾因 onCreate 少了
+  /// cny_amount 导致新机（朋友的安卓机）一保存就报 no column named cny_amount。
+  Future<void> _onOpen(Database db) async {
+    final columns = <String>{};
+    for (final row in await db.rawQuery('PRAGMA table_info(poker_records)')) {
+      columns.add(row['name'] as String);
+    }
+    const required = <String, String>{
+      'cny_amount': 'REAL',
+      'table_type': 'TEXT',
+      'hand_notes': 'TEXT',
+      'trip_id': 'INTEGER',
+    };
+    for (final entry in required.entries) {
+      if (!columns.contains(entry.key)) {
+        await db.execute(
+            'ALTER TABLE poker_records ADD COLUMN ${entry.key} ${entry.value}');
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -36,6 +59,7 @@ class DatabaseHelper {
         location TEXT NOT NULL,
         currency TEXT NOT NULL,
         amount REAL NOT NULL,
+        cny_amount REAL,
         blind_level TEXT NOT NULL,
         remark TEXT,
         table_type TEXT,
