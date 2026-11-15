@@ -176,6 +176,9 @@ class ExcelImporter {
             (c) => c == null || (c.value?.toString().trim() ?? '').isEmpty)) {
           continue;
         }
+        // 导出文件末尾带「汇总统计/总场次/累计净盈亏/汇率」区块，
+        // 不是数据行——直接结束解析，否则会报一堆「解析失败」
+        if (_isSummaryRow(row)) break;
 
         try {
           var record = _parseRow(row, columnMap);
@@ -230,6 +233,28 @@ class ExcelImporter {
       failedDetails: [],
       errorMessage: msg,
     );
+  }
+
+  /// 导出文件末尾的汇总区块标签
+  static const List<String> _summaryLabels = [
+    '汇总统计',
+    '总场次',
+    '总时长',
+    '累计净盈亏',
+    '汇率',
+  ];
+
+  /// 是否为「汇总统计」区块的行（只看第一个非空单元格）
+  static bool _isSummaryRow(List<Data?> row) {
+    for (final c in row) {
+      final t = c?.value?.toString().trim() ?? '';
+      if (t.isEmpty) continue;
+      for (final label in _summaryLabels) {
+        if (t.startsWith(label)) return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   /// 扫描前 5 行，找关键词匹配最多的作为表头
