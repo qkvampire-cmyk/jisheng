@@ -31,13 +31,6 @@ jobs:
       - name: Flutter Analyze (self-check)
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Generate debug keystore
-        run: |
-          keytool -genkey -v -keystore android/app/debug.keystore \
-            -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
 

@@ -25,11 +25,24 @@ android {
         versionName = flutter.versionName
     }
 
+    // 固定签名：jisheng-release.p12（PKCS12，密码 jisheng2026）
+    // 这是自签名（sideload 用途），目的是让每次 CI 产物签名一致、可覆盖升级。
+    signingConfigs {
+        create("release") {
+            storeFile = file("jisheng-release.p12")
+            storePassword = "jisheng2026"
+            keyAlias = "jisheng"
+            keyPassword = "jisheng2026"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 固定签名（仓库内 jisheng-release.p12，PKCS12）
+            // 目的：CI 每次构建签名一致，手机才能覆盖升级；换签名会导致
+            // “软件包与现有软件包存在冲突”而必须卸载重装。
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
