@@ -530,13 +530,16 @@ class _VolatilityChartPainter extends CustomPainter {
       if (r.cumBb[i] > r.cumBb[peakIdx]) peakIdx = i;
     }
     final peakVal = r.cumBb[peakIdx];
+    // 当前不在峰值（有实质回撤）才画峰值标记/回撤填充，否则与终点圆点重合
+    final hasDrawdown =
+        r.cumBb.last < peakVal - 0.5 && peakIdx < r.cumBb.length - 1;
 
     // 绘图区裁剪：EV 线超出范围时不会画到坐标轴/图例区
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(padL, padT, plotW, plotH));
 
     // 当前回撤区间填充（峰值 → 现在的曲线下方），浅红
-    if (r.cumBb.last < peakVal - 0.5 && peakIdx < r.cumBb.length - 1) {
+    if (hasDrawdown) {
       final dd = Path()..moveTo(xOf(r.cumHands[peakIdx]), yOf(peakVal));
       for (var i = peakIdx + 1; i < r.cumBb.length; i++) {
         dd.lineTo(xOf(r.cumHands[i]), yOf(r.cumBb[i]));
@@ -606,7 +609,7 @@ class _VolatilityChartPainter extends CustomPainter {
 
     // 峰值标记（墨绿小点 + 白边）
     final peakPt = Offset(xOf(r.cumHands[peakIdx]), yOf(peakVal));
-    if (peakIdx > 0) {
+    if (hasDrawdown) {
       canvas.drawCircle(peakPt, 3.4, Paint()..color = AppColors.seed);
       canvas.drawCircle(
           peakPt,
@@ -640,20 +643,37 @@ class _VolatilityChartPainter extends CustomPainter {
     yTick(hi);
     if (lo < 0 && hi > 0) yTick(0);
     yTick(lo);
+    // 跨度大时补一个中间刻度（与 0 刻度保持距离，避免文字重叠）
+    final midTick = (hi + lo) / 2;
+    if ((hi - lo) > 600 && midTick.abs() > (hi - lo) * 0.15) {
+      yTick(midTick);
+    }
 
-    // 峰值标注（贴在峰值点上方；顶部没空间则翻到点下方）
-    if (peakIdx > 0) {
-      tp.text = TextSpan(
-          text: '峰值 ${peakVal.toStringAsFixed(0)}',
-          style: TextStyle(
-              fontSize: 9.5,
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w600));
+    // 峰值标注（白描边浮在曲线上，任何背景都可读；顶部没空间则翻到点下方）
+    if (hasDrawdown) {
+      final txt = '峰值 ${peakVal.toStringAsFixed(0)}';
+      const txtStyle = TextStyle(
+          fontSize: 10.5,
+          color: AppColors.textSecondary,
+          fontWeight: FontWeight.w600);
+      final haloStyle = TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          foreground: Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.8
+            ..color = Colors.white);
+      tp.text = TextSpan(text: txt, style: txtStyle);
       tp.layout();
       var lx = peakPt.dx - tp.width / 2;
       lx = lx.clamp(padL, max(padL, w - padR - tp.width)).toDouble();
-      var ly = peakPt.dy - 11 - tp.height;
-      if (ly < padT) ly = peakPt.dy + 9;
+      var ly = peakPt.dy - 12 - tp.height;
+      if (ly < padT) ly = peakPt.dy + 10;
+      tp.text = TextSpan(text: txt, style: haloStyle);
+      tp.layout();
+      tp.paint(canvas, Offset(lx, ly));
+      tp.text = TextSpan(text: txt, style: txtStyle);
+      tp.layout();
       tp.paint(canvas, Offset(lx, ly));
     }
     // X：0 / ½ / 总手数
