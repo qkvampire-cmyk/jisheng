@@ -6,7 +6,7 @@ import '../providers/volatility_provider.dart';
 import '../theme/app_colors.dart';
 import '../utils/volatility_calculator.dart';
 
-/// 波动分析页 — 累计盈亏曲线 vs 置信带 + 下风期诊断
+/// 波动分析页 — 累计盈亏曲线（主角）+ EV理论线 + 峰值/回撤标注 + 下风期诊断
 class VolatilityPage extends StatefulWidget {
   const VolatilityPage({super.key});
 
@@ -51,7 +51,7 @@ class _VolatilityPageState extends State<VolatilityPage> {
             Text('暂无账目记录',
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 16)),
             SizedBox(height: 8),
-            Text('记账后这里会显示你的盈亏波动带',
+            Text('记账后这里会显示你的累计盈亏曲线',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
           ],
         ),
@@ -83,15 +83,14 @@ class _VolatilityPageState extends State<VolatilityPage> {
                   spacing: 12,
                   runSpacing: 4,
                   children: [
-                    _LegendItem(Color(0x4D8E9FB3), '95%置信区间'),
-                    _LegendItem(Color(0x668AA68A), '70%置信区间'),
                     _LegendLine('累计盈亏'),
                     _LegendDash('EV理论线'),
+                    _LegendItem(Color(0x33DC2626), '当前回撤'),
                   ],
                 ),
               ),
               SizedBox(
-                height: 250,
+                height: 320,
                 child: CustomPaint(
                   painter: _VolatilityChartPainter(result),
                   size: Size.infinite,
@@ -476,16 +475,16 @@ class _LegendDash extends StatelessWidget {
   }
 }
 
-/// 波动图绘制：95%/70% 置信带 + EV 虚线 + 累计曲线
+/// 波动图绘制：累计盈亏曲线（主角）+ EV 虚线 + 峰值/当前回撤标注
 class _VolatilityChartPainter extends CustomPainter {
   final VolatilityResult r;
 
   // 莫兰迪调
-  static const _band95 = Color(0x268E9FB3); // 蓝灰 15%
-  static const _band70 = Color(0x33A8BCA8); // 灰绿 20%
   static const _curve = Color(0xFF3F3A36); // 暖深灰
   static const _evLine = Color(0xFF6B7280); // 加深，与零线明确区分
   static const _zeroLine = Color(0xFFE0DCD6); // 浅色实线（不再是虚线）
+  static const _ddFill = Color(0x1ADC2626); // 当前回撤区间填充 10% 红
+  static const _sessionDot = Color(0x406B7280); // 每场结束点 25% 灰
 
   _VolatilityChartPainter(this.r);
 
@@ -497,65 +496,55 @@ class _VolatilityChartPainter extends CustomPainter {
     final w = size.width, h = size.height;
     final plotW = w - padL - padR, plotH = h - padT - padB;
 
-    // 数据范围：70% 带 + 曲线（95% 带超出画布自然裁剪，避免 EV 线被撑平）
+    // EV 理论线采样点
     final ev =
         List<double>.generate(81, (i) => r.mu * (r.totalHands * i / 80) / 100);
-    final sd = List<double>.generate(
-        81, (i) => r.sigma * sqrt(r.totalHands * i / 80 / 100));
-    const z95 = 1.96, z70 = 1.04;
+
+    // 曲线是主角：Y 轴按累计曲线自适应；EV 端点只允许把跨度撑到曲线的 1.6 倍以内
     var minV = 0.0, maxV = 0.0;
-    for (var i = 0; i < 81; i++) {
-      minV = min(minV, ev[i] - z70 * sd[i]);
-      maxV = max(maxV, ev[i] + z70 * sd[i]);
-    }
     for (final v in r.cumBb) {
       minV = min(minV, v);
       maxV = max(maxV, v);
     }
-    if (maxV - minV < 1) {
-      maxV = minV + 1;
+    final curveSpan = max(1.0, maxV - minV);
+    final evEnd = r.mu * r.blockCount; // EV 线终点（bb）
+    var lo = min(minV, min(0.0, evEnd));
+    var hi = max(maxV, max(0.0, evEnd));
+    final limit = curveSpan * 1.6;
+    if (hi - lo > limit) {
+      final mid = (minV + maxV) / 2;
+      lo = mid - limit / 2;
+      hi = mid + limit / 2;
     }
-    // 上下留 12% 余量
-    final span = maxV - minV;
-    maxV += span * 0.12;
-    minV -= span * 0.12;
+    // 上下各留 10% 余量
+    final pad = (hi - lo) * 0.10;
+    minV = lo - pad;
+    maxV = hi + pad;
 
     double xOf(double hands) => padL + (hands / r.totalHands) * plotW;
     double yOf(double v) => padT + (maxV - v) / (maxV - minV) * plotH;
 
-    // 置信带（按 EV ± z·σ 采样点围成 Path）
-    final pts95Up = <Offset>[], pts95Dn = <Offset>[];
-    final pts70Up = <Offset>[], pts70Dn = <Offset>[];
-    for (var i = 0; i < 81; i++) {
-      final hh = r.totalHands * i / 80;
-      final x = xOf(hh);
-      pts95Up.add(Offset(x, yOf(ev[i] + z95 * sd[i])));
-      pts95Dn.add(Offset(x, yOf(ev[i] - z95 * sd[i])));
-      pts70Up.add(Offset(x, yOf(ev[i] + z70 * sd[i])));
-      pts70Dn.add(Offset(x, yOf(ev[i] - z70 * sd[i])));
+    // 历史峰值 / 当前回撤区间（峰值之后 → 现在）
+    var peakIdx = 0;
+    for (var i = 1; i < r.cumBb.length; i++) {
+      if (r.cumBb[i] > r.cumBb[peakIdx]) peakIdx = i;
     }
+    final peakVal = r.cumBb[peakIdx];
 
-    // 95% 带
-    final path95 = Path()..moveTo(pts95Up.first.dx, pts95Up.first.dy);
-    for (final p in pts95Up) {
-      path95.lineTo(p.dx, p.dy);
-    }
-    for (final p in pts95Dn.reversed) {
-      path95.lineTo(p.dx, p.dy);
-    }
-    path95.close();
-    canvas.drawPath(path95, Paint()..color = _band95);
+    // 绘图区裁剪：EV 线超出范围时不会画到坐标轴/图例区
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(padL, padT, plotW, plotH));
 
-    // 70% 带
-    final path70 = Path()..moveTo(pts70Up.first.dx, pts70Up.first.dy);
-    for (final p in pts70Up) {
-      path70.lineTo(p.dx, p.dy);
+    // 当前回撤区间填充（峰值 → 现在的曲线下方），浅红
+    if (r.cumBb.last < peakVal - 0.5 && peakIdx < r.cumBb.length - 1) {
+      final dd = Path()..moveTo(xOf(r.cumHands[peakIdx]), yOf(peakVal));
+      for (var i = peakIdx + 1; i < r.cumBb.length; i++) {
+        dd.lineTo(xOf(r.cumHands[i]), yOf(r.cumBb[i]));
+      }
+      dd.lineTo(xOf(r.cumHands.last), yOf(peakVal));
+      dd.close();
+      canvas.drawPath(dd, Paint()..color = _ddFill);
     }
-    for (final p in pts70Dn.reversed) {
-      path70.lineTo(p.dx, p.dy);
-    }
-    path70.close();
-    canvas.drawPath(path70, Paint()..color = _band70);
 
     // 零线（浅色实线，避免与 EV 虚线混淆）
     final zeroY = yOf(0);
@@ -577,12 +566,13 @@ class _VolatilityChartPainter extends CustomPainter {
           Offset(xOf(r.totalHands * (i + 1) / 80), yOf(ev[i + 1])), evPaint);
     }
 
-    // 累计曲线
+    // 累计曲线（主角，加粗）
     final curvePaint = Paint()
       ..color = _curve
-      ..strokeWidth = 2
+      ..strokeWidth = 2.4
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
     final pathCurve = Path();
     for (var i = 0; i < r.cumBb.length; i++) {
       final p = Offset(xOf(r.cumHands[i]), yOf(r.cumBb[i]));
@@ -594,6 +584,15 @@ class _VolatilityChartPainter extends CustomPainter {
     }
     canvas.drawPath(pathCurve, curvePaint);
 
+    // 每场结束点（淡灰小点，体现单场颗粒度；点太密时省略避免糊成一片）
+    if (r.cumBb.length <= 90) {
+      final dotPaint = Paint()..color = _sessionDot;
+      for (var i = 1; i < r.cumBb.length; i++) {
+        canvas.drawCircle(
+            Offset(xOf(r.cumHands[i]), yOf(r.cumBb[i])), 1.7, dotPaint);
+      }
+    }
+
     // 终点圆点
     final end = Offset(xOf(r.cumHands.last), yOf(r.cumBb.last));
     canvas.drawCircle(end, 4, Paint()..color = AppColors.seed);
@@ -604,6 +603,21 @@ class _VolatilityChartPainter extends CustomPainter {
           ..color = Colors.white
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5);
+
+    // 峰值标记（墨绿小点 + 白边）
+    final peakPt = Offset(xOf(r.cumHands[peakIdx]), yOf(peakVal));
+    if (peakIdx > 0) {
+      canvas.drawCircle(peakPt, 3.4, Paint()..color = AppColors.seed);
+      canvas.drawCircle(
+          peakPt,
+          3.4,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.4);
+    }
+
+    canvas.restore(); // 结束绘图区裁剪
 
     // 轴刻度
     final labelStyle = TextStyle(
@@ -622,9 +636,26 @@ class _VolatilityChartPainter extends CustomPainter {
       tp.paint(canvas, Offset(padL - 6 - tp.width, yOf(v) - 8));
     }
 
-    yTick(maxV);
-    yTick(0);
-    yTick(minV);
+    // Y 刻度标数据真实边界（lo/hi），10% 留白只影响画布位置
+    yTick(hi);
+    if (lo < 0 && hi > 0) yTick(0);
+    yTick(lo);
+
+    // 峰值标注（贴在峰值点上方；顶部没空间则翻到点下方）
+    if (peakIdx > 0) {
+      tp.text = TextSpan(
+          text: '峰值 ${peakVal.toStringAsFixed(0)}',
+          style: TextStyle(
+              fontSize: 9.5,
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w600));
+      tp.layout();
+      var lx = peakPt.dx - tp.width / 2;
+      lx = lx.clamp(padL, max(padL, w - padR - tp.width)).toDouble();
+      var ly = peakPt.dy - 11 - tp.height;
+      if (ly < padT) ly = peakPt.dy + 9;
+      tp.paint(canvas, Offset(lx, ly));
+    }
     // X：0 / ½ / 总手数
     label('0', Offset(padL, h - padB + 6));
     label((r.totalHands / 2).toStringAsFixed(0),
