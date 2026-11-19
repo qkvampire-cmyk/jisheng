@@ -175,7 +175,7 @@ VolatilityResult computeVolatility({
   final cumHands = <double>[0];
   final cumBb = <double>[0];
   // 起点占位（与 cumHands/cumBb 索引对齐，索引 0 不会用于读数）
-  final cumDates = <DateTime>[cur.valid.first.recordTime];
+  final cumDates = <DateTime>[cur.valid.first.$1.recordTime];
   var hAcc = 0.0, bAcc = 0.0, peak = 0.0;
   var hkdAcc = 0.0, hkdPeak = 0.0;
   for (final e in cur.valid) {
