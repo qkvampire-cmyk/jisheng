@@ -516,10 +516,11 @@ class _VolatilityChartPainter extends CustomPainter {
       lo = mid - limit / 2;
       hi = mid + limit / 2;
     }
-    // 上下各留 10% 余量
-    final pad = (hi - lo) * 0.10;
-    minV = lo - pad;
-    maxV = hi + pad;
+    // 上下留白：顶部多留（给峰值标签腾位置），底部少留
+    final padTop = (hi - lo) * 0.14;
+    final padBot = (hi - lo) * 0.08;
+    minV = lo - padBot;
+    maxV = hi + padTop;
 
     double xOf(double hands) => padL + (hands / r.totalHands) * plotW;
     double yOf(double v) => padT + (maxV - v) / (maxV - minV) * plotH;
@@ -667,8 +668,8 @@ class _VolatilityChartPainter extends CustomPainter {
       tp.layout();
       var lx = peakPt.dx - tp.width / 2;
       lx = lx.clamp(padL, max(padL, w - padR - tp.width)).toDouble();
-      var ly = peakPt.dy - 12 - tp.height;
-      if (ly < padT) ly = peakPt.dy + 10;
+      var ly = peakPt.dy - 9 - tp.height;
+      if (ly < padT) ly = peakPt.dy + 9;
       tp.text = TextSpan(text: txt, style: haloStyle);
       tp.layout();
       tp.paint(canvas, Offset(lx, ly));
@@ -676,11 +677,37 @@ class _VolatilityChartPainter extends CustomPainter {
       tp.layout();
       tp.paint(canvas, Offset(lx, ly));
     }
-    // X：0 / ½ / 总手数
-    label('0', Offset(padL, h - padB + 6));
-    label((r.totalHands / 2).toStringAsFixed(0),
-        Offset(xOf(r.totalHands / 2) - 14, h - padB + 6));
-    label(r.totalHands.toStringAsFixed(0), Offset(w - padR - 34, h - padB + 6));
+    // X 轴刻度线：每 1000 手一道（手数少时自动降档），只刻线不逐道标数字
+    final tickStep = r.totalHands >= 4000
+        ? 1000.0
+        : r.totalHands >= 2000
+            ? 500.0
+            : r.totalHands >= 800
+                ? 250.0
+                : max(50.0, r.totalHands / 4);
+    final tickPaint = Paint()
+      ..color = AppColors.textMuted.withValues(alpha: 0.5)
+      ..strokeWidth = 1;
+    final tickCount = (r.totalHands / tickStep).floor();
+    for (var i = 0; i <= tickCount; i++) {
+      final hh = i * tickStep;
+      final x = xOf(hh);
+      canvas.drawLine(Offset(x, h - padB), Offset(x, h - padB + 4), tickPaint);
+      // 每两格标一个数字（0 / 2000 / 4000 / 6000 …）
+      if (i % 2 == 0) {
+        tp.text = TextSpan(text: hh.toStringAsFixed(0), style: labelStyle);
+        tp.layout();
+        final lx =
+            (x - tp.width / 2).clamp(padL, w - padR - tp.width).toDouble();
+        tp.paint(canvas, Offset(lx, h - padB + 6));
+      }
+    }
+    // 末尾标总手数（与上一个已标数字距离太近则省略）
+    final lastLabeled = (tickCount ~/ 2) * 2 * tickStep;
+    if (r.totalHands - lastLabeled > tickStep * 0.6) {
+      label(r.totalHands.toStringAsFixed(0), Offset(w - padR, h - padB + 6),
+          right: true);
+    }
 
     // Y 轴单位（垂直）
     final yUnitTp = TextPainter(
