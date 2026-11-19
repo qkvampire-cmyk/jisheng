@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/poker_provider.dart';
@@ -91,10 +92,7 @@ class _VolatilityPageState extends State<VolatilityPage> {
               ),
               SizedBox(
                 height: 320,
-                child: CustomPaint(
-                  painter: _VolatilityChartPainter(result),
-                  size: Size.infinite,
-                ),
+                child: _VolatilityChart(result),
               ),
             ],
           ),
@@ -475,9 +473,55 @@ class _LegendDash extends StatelessWidget {
   }
 }
 
+/// 波动图 + 单指横向滑动读数
+///
+/// 竖线跟随手指，但读数吸附到最近的真实场次点（不插值——数据只有场次粒度，
+/// 插值等于编造数字）。横向手势归图表，纵向留给外层 ListView 滚动。
+class _VolatilityChart extends StatefulWidget {
+  final VolatilityResult result;
+
+  const _VolatilityChart(this.result);
+
+  @override
+  State<_VolatilityChart> createState() => _VolatilityChartState();
+}
+
+class _VolatilityChartState extends State<_VolatilityChart> {
+  final ValueNotifier<Offset?> _touch = ValueNotifier<Offset?>(null);
+
+  @override
+  void dispose() {
+    _touch.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (d) => _touch.value = d.localPosition,
+        onHorizontalDragUpdate: (d) => _touch.value = d.localPosition,
+        onHorizontalDragEnd: (_) => _touch.value = null,
+        onHorizontalDragCancel: () => _touch.value = null,
+        onTapDown: (d) => _touch.value = d.localPosition,
+        onTapUp: (_) => _touch.value = null,
+        onTapCancel: () => _touch.value = null,
+        child: CustomPaint(
+          painter: _VolatilityChartPainter(widget.result, _touch),
+          size: Size(constraints.maxWidth, constraints.maxHeight),
+        ),
+      ),
+    );
+  }
+}
+
 /// 波动图绘制：累计盈亏曲线（主角）+ EV 虚线 + 峰值/当前回撤标注
 class _VolatilityChartPainter extends CustomPainter {
   final VolatilityResult r;
+
+  /// 手指位置（null = 没在滑），走 repaint 通道：手指移动只重绘图表，不重建列表
+  final ValueListenable<Offset?> touch;
 
   // 莫兰迪调
   static const _curve = Color(0xFF3F3A36); // 暖深灰
@@ -486,7 +530,7 @@ class _VolatilityChartPainter extends CustomPainter {
   static const _ddFill = Color(0x1ADC2626); // 当前回撤区间填充 10% 红
   static const _sessionDot = Color(0x406B7280); // 每场结束点 25% 灰
 
-  _VolatilityChartPainter(this.r);
+  _VolatilityChartPainter(this.r, this.touch) : super(repaint: touch);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -622,6 +666,90 @@ class _VolatilityChartPainter extends CustomPainter {
     }
 
     canvas.restore(); // 结束绘图区裁剪
+
+    // ---- 手指滑动读数（竖线跟手，读数吸附最近一场，不插值）----
+    final pos = touch.value;
+    if (pos != null && r.cumDates.length == r.cumBb.length) {
+      final rawHands =
+          ((pos.dx - padL) / plotW * r.totalHands).clamp(0.0, r.totalHands);
+      var idx = 1;
+      var best = double.infinity;
+      for (var i = 1; i < r.cumHands.length; i++) {
+        final diff = (r.cumHands[i] - rawHands).abs();
+        if (diff < best) {
+          best = diff;
+          idx = i;
+        }
+      }
+      final dotX = xOf(r.cumHands[idx]);
+      final dotY = yOf(r.cumBb[idx]);
+
+      // 竖向指示虚线（浅灰，不抢曲线）
+      _dashLine(
+          canvas,
+          Offset(dotX, padT),
+          Offset(dotX, h - padB),
+          Paint()
+            ..color = AppColors.textMuted.withValues(alpha: 0.7)
+            ..strokeWidth = 1);
+
+      // 吸附点：白心 + 墨绿描边空心圈，与曲线上的实心点区分
+      canvas.drawCircle(Offset(dotX, dotY), 4.6, Paint()..color = Colors.white);
+      canvas.drawCircle(
+          Offset(dotX, dotY),
+          4.6,
+          Paint()
+            ..color = AppColors.seed
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.8);
+
+      // 气泡：日期 · 手数 / 累计盈亏 · 该场盈亏
+      final date = r.cumDates[idx];
+      final cum = r.cumBb[idx];
+      final delta = cum - r.cumBb[idx - 1];
+      final line1 =
+          '${date.month}/${date.day} · ${r.cumHands[idx].toStringAsFixed(0)} 手';
+      final line2 = '累计 ${cum >= 0 ? '+' : ''}${cum.toStringAsFixed(0)}bb'
+          ' · 本场 ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(0)}bb';
+      final tp1 = TextPainter(
+        text: TextSpan(
+            text: line1,
+            style:
+                const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final tp2 = TextPainter(
+        text: TextSpan(
+            text: line2,
+            style: const TextStyle(
+                fontSize: 10.5,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      const padH = 8.0, padV = 5.0;
+      final bw = max(tp1.width, tp2.width) + padH * 2;
+      final bh = tp1.height + 2 + tp2.height + padV * 2;
+      var bx = dotX + 10;
+      if (bx + bw > w - padR) bx = dotX - 10 - bw;
+      bx = bx.clamp(padL, max(padL, w - padR - bw)).toDouble();
+      var by = dotY - bh - 10;
+      if (by < padT) by = dotY + 12;
+      by = by.clamp(padT, max(padT, h - padB - bh)).toDouble();
+
+      final rect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(bx, by, bw, bh), const Radius.circular(6));
+      canvas.drawRRect(rect, Paint()..color = const Color(0xF7FFFFFF));
+      canvas.drawRRect(
+          rect,
+          Paint()
+            ..color = const Color(0x1F000000)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1);
+      tp1.paint(canvas, Offset(bx + padH, by + padV));
+      tp2.paint(canvas, Offset(bx + padH, by + padV + tp1.height + 2));
+    }
 
     // 轴刻度
     final labelStyle = TextStyle(

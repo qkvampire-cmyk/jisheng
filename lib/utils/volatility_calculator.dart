@@ -39,6 +39,9 @@ class VolatilityResult {
   /// 每场结束时的累计盈亏（bb）
   final List<double> cumBb;
 
+  /// 每个累计点对应的记录日期（与 cumHands/cumBb 索引对齐；索引 0 为起点占位）
+  final List<DateTime> cumDates;
+
   /// 当前回撤（bb）：当前范围历史峰值 − 当前累计，≥0
   final double currentDrawdown;
 
@@ -67,6 +70,7 @@ class VolatilityResult {
     required this.blockCount,
     required this.cumHands,
     required this.cumBb,
+    required this.cumDates,
     required this.currentDrawdown,
     required this.drawdownHkd,
     required this.drawdownProb,
@@ -152,6 +156,7 @@ VolatilityResult computeVolatility({
       blockCount: blockCount,
       cumHands: const [0],
       cumBb: const [0],
+      cumDates: const [],
       currentDrawdown: 0,
       drawdownHkd: 0,
       drawdownProb: 1,
@@ -169,6 +174,8 @@ VolatilityResult computeVolatility({
   cur.valid.sort((a, b) => a.$1.recordTime.compareTo(b.$1.recordTime));
   final cumHands = <double>[0];
   final cumBb = <double>[0];
+  // 起点占位（与 cumHands/cumBb 索引对齐，索引 0 不会用于读数）
+  final cumDates = <DateTime>[cur.valid.first.recordTime];
   var hAcc = 0.0, bAcc = 0.0, peak = 0.0;
   var hkdAcc = 0.0, hkdPeak = 0.0;
   for (final e in cur.valid) {
@@ -177,6 +184,7 @@ VolatilityResult computeVolatility({
     hkdAcc += e.$1.getAmountIn('HKD', exchangeRate);
     cumHands.add(hAcc);
     cumBb.add(bAcc);
+    cumDates.add(e.$1.recordTime);
     if (bAcc > peak) peak = bAcc;
     if (hkdAcc > hkdPeak) hkdPeak = hkdAcc;
   }
@@ -196,6 +204,7 @@ VolatilityResult computeVolatility({
     blockCount: blockCount,
     cumHands: cumHands,
     cumBb: cumBb,
+    cumDates: cumDates,
     currentDrawdown: currentDrawdown,
     drawdownHkd: drawdownHkd,
     drawdownProb: prob,
