@@ -746,13 +746,13 @@ class _TableTimerBarState extends State<_TableTimerBar> {
     _syncTicker(context.read<TableTimerProvider>());
   }
 
-  /// 计时中每秒刷新走秒显示；停止计时则停掉 ticker（只重建本组件，不影响列表）
+  /// 走秒中每秒刷新显示；暂停/停止则停掉 ticker（只重建本组件，不影响列表）
   void _syncTicker(TableTimerProvider timer) {
-    if (timer.isRunning && _ticker == null) {
+    if (timer.isTicking && _ticker == null) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() {});
       });
-    } else if (!timer.isRunning && _ticker != null) {
+    } else if (!timer.isTicking && _ticker != null) {
       _ticker!.cancel();
       _ticker = null;
     }
@@ -795,50 +795,87 @@ class _TableTimerBarState extends State<_TableTimerBar> {
     );
   }
 
-  /// 计时中状态：墨绿底 + 实时走秒 + 上桌中 + 下桌按钮
+  /// 计时中状态：墨绿底 + 实时走秒 + 「暂停」「收工」
+  /// 暂停中整条转暖灰、走秒冻结，右侧变「继续」「收工」
   Widget _buildRunning(BuildContext context, TableTimerProvider timer) {
-    final d = timer.elapsed;
+    final paused = timer.isPaused;
+    final d = timer.elapsed; // 净工时（暂停时为冻结值）
     final hh = d.inHours.toString().padLeft(2, '0');
     final mm = (d.inMinutes % 60).toString().padLeft(2, '0');
     final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+    final bg = paused ? AppColors.barTop : AppColors.seed;
+    final fg = paused ? AppColors.barText : Colors.white;
+    final sub = fg.withValues(alpha: 0.75);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.seed,
+        color: bg,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
-          const Icon(Icons.timer, size: 16, color: Colors.white),
+          Icon(
+            paused ? Icons.pause_circle_outline : Icons.timer,
+            size: 16,
+            color: fg,
+          ),
           const SizedBox(width: 8),
-          Text(
-            '工时',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.75),
-              fontSize: 13,
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    paused ? '已暂停' : '工时',
+                    style: TextStyle(color: sub, fontSize: 13),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$hh:$mm:$ss',
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: AppColors.tabular,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 6),
-          Text(
-            '$hh:$mm:$ss',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              fontFeatures: AppColors.tabular,
+          SizedBox(
+            height: 28,
+            child: OutlinedButton(
+              onPressed: paused
+                  ? () => context.read<TableTimerProvider>().resume()
+                  : () => context.read<TableTimerProvider>().pause(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: fg,
+                side: BorderSide(color: fg.withValues(alpha: 0.5)),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                minimumSize: const Size(0, 28),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                textStyle:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              ),
+              child: Text(paused ? '继续' : '暂停'),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
           SizedBox(
             height: 28,
             child: FilledButton(
               onPressed: () => _finish(context),
               style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: AppColors.seed,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                backgroundColor: paused ? AppColors.seed : Colors.white,
+                foregroundColor: paused ? Colors.white : AppColors.seed,
+                padding: const EdgeInsets.symmetric(horizontal: 13),
                 minimumSize: const Size(0, 28),
                 textStyle:
                     const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -851,20 +888,24 @@ class _TableTimerBarState extends State<_TableTimerBar> {
     );
   }
 
-  /// 下桌：兜底确认（不足5分钟=疑似误触 / 超12小时=疑似忘按）→ 停止计时 → 跳新增记账页（时长自动填）
+  /// 下桌：兜底确认（净工时不足5分钟=疑似误触 / 超12小时=疑似忘按）→ 停止计时 → 跳新增记账页（净时长为预填时长）
   Future<void> _finish(BuildContext context) async {
     final timer = context.read<TableTimerProvider>();
-    final d = timer.elapsed;
+    final d = timer.elapsed; // 净工时
+    final rest = timer.restTotal; // 累计休息（含当前这段未结束的暂停）
 
     if (d < const Duration(minutes: 5) || d > const Duration(hours: 12)) {
       final hint = d < const Duration(minutes: 5)
-          ? '本次计时不足 5 分钟，确定收工吗？'
-          : '本次计时已超过 12 小时，确定收工吗？';
+          ? '本次净工时不足 5 分钟，确定收工吗？'
+          : '本次净工时已超过 12 小时，确定收工吗？';
+      final restLine = rest >= const Duration(minutes: 1)
+          ? '\n中间休息 ${rest.inMinutes} 分钟，时长已扣除。'
+          : '';
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('收工记一局？'),
-          content: Text(hint),
+          content: Text('$hint$restLine'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, 'cancel'),
@@ -891,6 +932,7 @@ class _TableTimerBarState extends State<_TableTimerBar> {
       MaterialPageRoute(
         builder: (_) => RecordEditPage(
           initialDuration: duration.inMinutes / 60.0,
+          restMinutes: rest.inMinutes,
         ),
       ),
     );

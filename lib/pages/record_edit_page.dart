@@ -9,10 +9,18 @@ import '../widgets/app_appbar.dart';
 class RecordEditPage extends StatefulWidget {
   final PokerRecord? existingRecord;
 
-  /// 新增模式下的预填时长（小时）——上桌计时下桌后自动带入
+  /// 新增模式下的预填时长（小时）——上桌计时下桌后自动带入（已扣除休息）
   final double? initialDuration;
 
-  const RecordEditPage({super.key, this.existingRecord, this.initialDuration});
+  /// 上桌计时累计休息分钟数（>0 时进页提示「已扣除」，让数字可溯源）
+  final int restMinutes;
+
+  const RecordEditPage({
+    super.key,
+    this.existingRecord,
+    this.initialDuration,
+    this.restMinutes = 0,
+  });
 
   @override
   State<RecordEditPage> createState() => _RecordEditPageState();
@@ -59,6 +67,17 @@ class _RecordEditPageState extends State<RecordEditPage> {
     }
     // 默认值初始化（等一帧确保 Provider 数据就绪）
     WidgetsBinding.instance.addPostFrameCallback((_) => _initDefaults());
+    // 上桌计时带来的休息扣除提示（数字可溯源）
+    if (record == null && widget.restMinutes > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已扣除休息 ${widget.restMinutes} 分钟，时长按净工时预填'),
+          ),
+        );
+      });
+    }
   }
 
   void _initDefaults() {
